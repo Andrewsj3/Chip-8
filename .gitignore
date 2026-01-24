@@ -1,0 +1,5 @@
+obj/
+roms/
+chip-8
+.cache/
+compile_commands.json
