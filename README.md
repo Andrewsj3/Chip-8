@@ -15,6 +15,19 @@ make # DEBUG=1 for debug messages
 ./chip-8 /path/to/rom
 ```
 
+## Controls
+This emulator uses the following keymap:
+```
+1 2 3 4
+Q W E R
+A S D F
+Z X C V
+```
+Esc closes the emulator.
+### Debug
+Controls exclusive to debug mode:
+- Space:       Toggle between running and paused
+- Right arrow: Step forward one instruction
+
 > [!IMPORTANT]
-> This is in early development, do not expect most roms to work.
-> Only the IBM ROM works at the moment.
+> This is in early development, expect bugs.

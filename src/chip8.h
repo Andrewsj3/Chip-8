@@ -7,6 +7,8 @@
 #define DISPLAY_WIDTH 64
 #define DISPLAY_HEIGHT 32
 #define MEM_SIZE 4096 // 4kB
+#define STACK_SIZE 16
+#define KEYPAD_ENTRIES 16
 
 typedef struct {
     uint16_t delay;
@@ -31,12 +33,17 @@ typedef struct {
     bool beep;
     bool exit;
     bool draw;
+    bool step; // steps forward one instruction
+    bool run;  // controls whether the emulator is running or paused
 } chip8_flags;
 
 typedef struct {
     uint8_t display[DISPLAY_WIDTH * DISPLAY_HEIGHT];
+    uint8_t keypad[KEYPAD_ENTRIES];
+    uint16_t stack[STACK_SIZE];
     uint8_t memory[MEM_SIZE];
     uint16_t pc;
+    uint16_t sp;
     chip8_instruction cur_instr;
     chip8_timers timers;
     chip8_flags flags;
@@ -46,7 +53,7 @@ typedef struct {
 void dprintf(const char *restrict format, ...);
 
 uint32_t emulate_instruction(uint32_t interval, void *userdata);
-void poll_input(chip8_flags *flags);
-uint32_t update_timers(uint32_t interval, void* userdata);
+void poll_input(chip8 *emulator);
+uint32_t update_timers(uint32_t interval, void *userdata);
 
 #endif

@@ -18,8 +18,8 @@ typedef struct {
 } sdl_state;
 
 typedef struct {
-    chip8 emulator;
-    sdl_audio_state audio;
+    chip8 *emulator;
+    sdl_audio_state *audio;
 } callback_data;
 
 bool sdl_create_context(sdl_state *state);

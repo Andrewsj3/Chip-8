@@ -8,10 +8,10 @@ void audio_callback(void *userdata, uint8_t *stream, int len) {
     int16_t *buffer     = (int16_t *)stream;
     int num_samples     = len / sizeof(*buffer);
     double phase        = 0;
-    if (data->emulator.flags.beep) {
+    if (data->emulator->flags.beep) {
         for (int i = 0; i < num_samples; ++i) {
             buffer[i]  = (phase < .5) ? AMPLITUDE : -AMPLITUDE;
-            phase     += (double)(BEEP_FREQ) / (double)data->audio.spec.freq;
+            phase     += (double)(BEEP_FREQ) / (double)data->audio->spec.freq;
             if (phase >= 1.0) {
                 phase -= 1.0;
             }
