@@ -44,7 +44,6 @@ typedef struct {
     uint8_t memory[MEM_SIZE];
     uint16_t pc;
     uint16_t sp;
-    chip8_instruction cur_instr;
     chip8_timers timers;
     chip8_flags flags;
     chip8_regs regs;

@@ -22,12 +22,12 @@ chip8_instruction get_cur_instr(chip8 *emulator) {
     uint8_t byte1  = emulator->memory[emulator->pc];
     uint8_t byte2  = emulator->memory[emulator->pc + 1];
     uint16_t instr = (byte1 << 8) | byte2;
-    uint8_t kind   = instr >> 12 & 0xF;
-    uint8_t X      = instr >> 8 & 0xF;
-    uint8_t Y      = instr >> 4 & 0xF;
-    uint8_t N      = instr >> 0 & 0x00F;
-    uint8_t NN     = instr >> 0 & 0x0FF;
-    uint16_t NNN   = instr >> 0 & 0xFFF;
+    uint8_t kind   = instr >> 0xC & 0x00F;
+    uint8_t X      = instr >> 0x8 & 0x00F;
+    uint8_t Y      = instr >> 0x4 & 0x00F;
+    uint8_t N      = instr >> 0x0 & 0x00F;
+    uint8_t NN     = instr >> 0x0 & 0x0FF;
+    uint16_t NNN   = instr >> 0x0 & 0xFFF;
     return (chip8_instruction){
         .kind = kind,
         .X    = X,
@@ -38,12 +38,140 @@ chip8_instruction get_cur_instr(chip8 *emulator) {
     };
 }
 
+void handle_arithmetic(chip8 *emulator, const chip8_instruction *instr) {
+    uint8_t *vars = emulator->regs.vars;
+    switch (instr->N) {
+    case 0x0:
+        vars[instr->X] = vars[instr->Y];
+        dprintf("V%X = V%X: V%X = %X\n", instr->X, instr->Y, instr->X, vars[instr->X]);
+        break;
+    case 0x1:
+        vars[instr->X] |= vars[instr->Y];
+        dprintf("V%X = V%X | V%X: V%X = %X\n", instr->X, instr->X, instr->Y, instr->X,
+                vars[instr->X]);
+        break;
+    case 0x2:
+        vars[instr->X] &= vars[instr->Y];
+        dprintf("V%X = V%X & V%X: V%X = %X\n", instr->X, instr->X, instr->Y, instr->X,
+                vars[instr->X]);
+        break;
+    case 0x3:
+        vars[instr->X] ^= vars[instr->Y];
+        dprintf("V%X = V%X ^ V%X: V%X = %X\n", instr->X, instr->X, instr->Y, instr->X,
+                vars[instr->X]);
+        break;
+    case 0x4: {
+        uint16_t result = vars[instr->X] + vars[instr->Y];
+        vars[0xF]       = result > 255;
+        vars[instr->X]  = (uint8_t)result;
+        dprintf("V%X = V%X + V%X: V%X = %X\n", instr->X, instr->X, instr->Y, instr->X,
+                vars[instr->X]);
+        break;
+    }
+    case 0x5:
+        vars[0xF]       = vars[instr->X] >= vars[instr->Y];
+        vars[instr->X] -= vars[instr->Y];
+        dprintf("V%X = V%X - V%X: V%X = %X\n", instr->X, instr->X, instr->Y, instr->X,
+                vars[instr->X]);
+        break;
+    case 0x6:
+        vars[0xF]        = vars[instr->X] & 1;
+        vars[instr->X] >>= 1;
+        dprintf("Shift V%X right, V%X = %X\n", instr->X, instr->X, vars[instr->X]);
+        break;
+    case 0x7:
+        vars[0xF]      = vars[instr->Y] >= vars[instr->X];
+        vars[instr->X] = vars[instr->Y] - vars[instr->X];
+        dprintf("V%X = V%X - V%X: V%X = %X\n", instr->X, instr->Y, instr->X, instr->X,
+                vars[instr->X]);
+        break;
+    case 0xE:
+        vars[0xF]        = vars[instr->X] >= 128;
+        vars[instr->X] <<= 1;
+        dprintf("Shift V%X left, V%X = %X\n", instr->X, instr->X, vars[instr->X]);
+        break;
+    default:
+        printf("Illegal instruction %X%03X\n", instr->kind, instr->NNN);
+        emulator->flags.exit = true;
+        break;
+    }
+}
+
+void handle_misc(chip8 *emulator, const chip8_instruction *instr) {
+    uint8_t *vars = emulator->regs.vars;
+    switch (instr->NN) {
+    case 0x07:
+        vars[instr->X] = emulator->timers.delay;
+        dprintf("Set V%X to value of delay timer (%X)\n", instr->X, emulator->timers.delay);
+        break;
+    case 0x0A: {
+        bool pressed = false;
+        for (int i = 0; i < KEYPAD_ENTRIES; ++i) {
+            if (emulator->keypad[i]) {
+                vars[instr->X] = i;
+                pressed        = true;
+                break;
+            }
+        }
+        if (!pressed) {
+            emulator->pc -= 2;
+        }
+        dprintf("Waiting for key (key%s pressed)\n", pressed ? "" : " not");
+        break;
+    }
+    case 0x15:
+        emulator->timers.delay = vars[instr->X];
+        dprintf("Set delay timer to value of V%X (%X)\n", instr->X, emulator->timers.delay);
+        break;
+    case 0x18:
+        emulator->timers.sound = vars[instr->X];
+        dprintf("Set sound timer to value of V%X (%X)\n", instr->X, emulator->timers.sound);
+        break;
+    case 0x1E:
+        emulator->regs.index += vars[instr->X];
+        dprintf("Add V%X to index register (I = %X)\n", instr->X, emulator->regs.index);
+        break;
+    case 0x29:
+        emulator->regs.index = (vars[instr->X] & 0xF) * FONT_HEIGHT_PX;
+        // Sometimes the value in VX is greater than 15, so we need the binary and.
+        // Otherwise we'll just draw random stuff from ram
+        dprintf("Set index register to font character %X (I = %04X)\n", vars[instr->X],
+                emulator->regs.index);
+        break;
+    case 0x33:
+        if (emulator->regs.index + 2 < MEM_SIZE) {
+            emulator->memory[emulator->regs.index + 0] = vars[instr->X] / 100;
+            emulator->memory[emulator->regs.index + 1] = (vars[instr->X] / 10) % 10;
+            emulator->memory[emulator->regs.index + 2] = vars[instr->X] % 10;
+        }
+        dprintf("Do BCD on V%X: I = %d, I + 1 = %d, I + 2 = %d\n", instr->X,
+                emulator->memory[emulator->regs.index], emulator->memory[emulator->regs.index + 1],
+                emulator->memory[emulator->regs.index + 2]);
+        break;
+    case 0x55:
+        for (int i = 0; i <= instr->X; ++i) {
+            emulator->memory[emulator->regs.index + i] = vars[i];
+        }
+        dprintf("Store registers V0 - V%X to memory\n", instr->X);
+        break;
+    case 0x65:
+        for (int i = 0; i <= instr->X; ++i) {
+            vars[i] = emulator->memory[emulator->regs.index + i];
+        }
+        dprintf("Load registers V0 - V%X from memory\n", instr->X);
+        break;
+    default:
+        printf("Illegal instruction %X%03X\n", instr->kind, instr->NNN);
+        emulator->flags.exit = true;
+        break;
+    }
+}
+
 void set_pixel(chip8 *emulator, int x, int y) {
     uint8_t *pixel  = &emulator->display[y * DISPLAY_WIDTH + x];
     *pixel         ^= 1;
     if (*pixel == 0) {
-        // pixel turned off, set collision flag
-        emulator->regs.vars[0xF] = 1;
+        emulator->regs.vars[0xF] = true;
     }
 }
 
@@ -66,6 +194,7 @@ uint32_t emulate_instruction(uint32_t interval, void *userdata) {
     }
 #endif
     chip8_instruction instr = get_cur_instr(emulator);
+    uint8_t *vars           = emulator->regs.vars;
     dprintf("Address: %04X, Instruction: %X%03X, Description: ", emulator->pc, instr.kind,
             instr.NNN);
     emulator->pc += 2;
@@ -92,100 +221,39 @@ uint32_t emulate_instruction(uint32_t interval, void *userdata) {
         dprintf("Call subroutine %04X\n", emulator->pc);
         break;
     case 0x3:
-        dprintf("Skip if V%X == NN: %02X == %02X (%sskipped)\n", instr.X,
-                emulator->regs.vars[instr.X], instr.NN,
-                emulator->regs.vars[instr.X] == instr.NN ? "" : "not ");
-        if (emulator->regs.vars[instr.X] == instr.NN) {
+        dprintf("Skip if V%X == NN: %02X == %02X (%sskipped)\n", instr.X, vars[instr.X], instr.NN,
+                vars[instr.X] == instr.NN ? "" : "not ");
+        if (vars[instr.X] == instr.NN) {
             emulator->pc += 2;
         }
         break;
     case 0x4:
-        dprintf("Skip if V%X != NN: %02X != %02X (%sskipped)\n", instr.X,
-                emulator->regs.vars[instr.X], instr.NN,
-                emulator->regs.vars[instr.X] != instr.NN ? "" : "not ");
-        if (emulator->regs.vars[instr.X] != instr.NN) {
+        dprintf("Skip if V%X != NN: %02X != %02X (%sskipped)\n", instr.X, vars[instr.X], instr.NN,
+                vars[instr.X] != instr.NN ? "" : "not ");
+        if (vars[instr.X] != instr.NN) {
             emulator->pc += 2;
         }
         break;
     case 0x5:
-        dprintf("Skip if V%X == VY: %02X == %02X (%sskipped)\n", instr.X,
-                emulator->regs.vars[instr.X], emulator->regs.vars[instr.Y],
-                emulator->regs.vars[instr.X] == emulator->regs.vars[instr.Y] ? "" : "not ");
-        if (emulator->regs.vars[instr.X] == emulator->regs.vars[instr.Y]) {
+        dprintf("Skip if V%X == VY: %02X == %02X (%sskipped)\n", instr.X, vars[instr.X],
+                vars[instr.Y], vars[instr.X] == vars[instr.Y] ? "" : "not ");
+        if (vars[instr.X] == vars[instr.Y]) {
             emulator->pc += 2;
         }
         break;
     case 0x6:
         dprintf("Set V%X to %02X\n", instr.X, instr.NN);
-        emulator->regs.vars[instr.X] = instr.NN;
+        vars[instr.X] = instr.NN;
         break;
     case 0x7:
         dprintf("Add %02X to V%X\n", instr.NN, instr.X);
-        emulator->regs.vars[instr.X] += instr.NN;
+        vars[instr.X] += instr.NN;
         break;
-    case 0x8:
-        switch (instr.NNN & 0xF) {
-        case 0x0:
-            emulator->regs.vars[instr.X] = emulator->regs.vars[instr.Y];
-            dprintf("V%X = V%X: V%X = %X\n", instr.X, instr.Y, instr.X,
-                    emulator->regs.vars[instr.X]);
-            break;
-        case 0x1:
-            emulator->regs.vars[instr.X] |= emulator->regs.vars[instr.Y];
-            dprintf("V%X = V%X | V%X: V%X = %X\n", instr.X, instr.X, instr.Y, instr.X,
-                    emulator->regs.vars[instr.X]);
-            break;
-        case 0x2:
-            emulator->regs.vars[instr.X] &= emulator->regs.vars[instr.Y];
-            dprintf("V%X = V%X & V%X: V%X = %X\n", instr.X, instr.X, instr.Y, instr.X,
-                    emulator->regs.vars[instr.X]);
-            break;
-        case 0x3:
-            emulator->regs.vars[instr.X] ^= emulator->regs.vars[instr.Y];
-            dprintf("V%X = V%X ^ V%X: V%X = %X\n", instr.X, instr.X, instr.Y, instr.X,
-                    emulator->regs.vars[instr.X]);
-            break;
-        case 0x4: {
-            uint16_t result          = emulator->regs.vars[instr.X] + emulator->regs.vars[instr.Y];
-            emulator->regs.vars[0xF] = result > 255;
-            emulator->regs.vars[instr.X] = (uint8_t)result;
-            dprintf("V%X = V%X + V%X: V%X = %X\n", instr.X, instr.X, instr.Y, instr.X,
-                    emulator->regs.vars[instr.X]);
-            break;
-        }
-        case 0x5:
-            emulator->regs.vars[0xF] = emulator->regs.vars[instr.X] >= emulator->regs.vars[instr.Y];
-            emulator->regs.vars[instr.X] -= emulator->regs.vars[instr.Y];
-            dprintf("V%X = V%X - V%X: V%X = %X\n", instr.X, instr.X, instr.Y, instr.X,
-                    emulator->regs.vars[instr.X]);
-            break;
-        case 0x6:
-            emulator->regs.vars[0xF]       = emulator->regs.vars[instr.X] & 1;
-            emulator->regs.vars[instr.X] >>= 1;
-            dprintf("Shift V%X right, V%X = %X\n", instr.X, instr.X, emulator->regs.vars[instr.X]);
-            break;
-        case 0x7:
-            emulator->regs.vars[0xF] = emulator->regs.vars[instr.Y] >= emulator->regs.vars[instr.X];
-            emulator->regs.vars[instr.X] =
-                emulator->regs.vars[instr.Y] - emulator->regs.vars[instr.X];
-            dprintf("V%X = V%X - V%X: V%X = %X\n", instr.X, instr.Y, instr.X, instr.X,
-                    emulator->regs.vars[instr.X]);
-            break;
-        case 0xE:
-            emulator->regs.vars[0xF]       = emulator->regs.vars[instr.X] >= 128;
-            emulator->regs.vars[instr.X] <<= 1;
-            dprintf("Shift V%X left, V%X = %X\n", instr.X, instr.X, emulator->regs.vars[instr.X]);
-            break;
-        default:
-            printf("Illegal instruction %X%03X\n", instr.kind, instr.NNN);
-            emulator->flags.exit = true;
-        }
-        break;
+    case 0x8: handle_arithmetic(emulator, &instr); break;
     case 0x9:
-        dprintf("Skip if V%X != V%X: %X != %X (%sskipped)\n", instr.X, instr.Y,
-                emulator->regs.vars[instr.X], emulator->regs.vars[instr.Y],
-                emulator->regs.vars[instr.X] != emulator->regs.vars[instr.Y] ? "" : "not ");
-        if (emulator->regs.vars[instr.X] != emulator->regs.vars[instr.Y]) {
+        dprintf("Skip if V%X != V%X: %X != %X (%sskipped)\n", instr.X, instr.Y, vars[instr.X],
+                vars[instr.Y], vars[instr.X] != vars[instr.Y] ? "" : "not ");
+        if (vars[instr.X] != vars[instr.Y]) {
             emulator->pc += 2;
         }
         break;
@@ -194,27 +262,30 @@ uint32_t emulate_instruction(uint32_t interval, void *userdata) {
         emulator->regs.index = instr.NNN;
         break;
     case 0xB:
-        emulator->pc = instr.NNN + emulator->regs.vars[0];
-        dprintf("Set pc to %04X + %X (%X)\n", instr.NNN, emulator->regs.vars[0], emulator->pc);
+        emulator->pc = instr.NNN + vars[0];
+        dprintf("Set pc to %04X + %X (%X)\n", instr.NNN, vars[0], emulator->pc);
         break;
     case 0xC:
-        emulator->regs.vars[instr.X] = (rand() % 256) & instr.NN;
-        dprintf("Set V%X to random number %X\n", instr.X, emulator->regs.vars[instr.X]);
+        vars[instr.X] = (rand() % 256) & instr.NN;
+        dprintf("Set V%X to random number %X\n", instr.X, vars[instr.X]);
         break;
     case 0xD:
-        emulator->flags.draw     = true;
-        emulator->regs.vars[0xF] = 0;
-        uint16_t x               = emulator->regs.vars[instr.X];
-        uint16_t y               = emulator->regs.vars[instr.Y];
+        emulator->flags.draw = true;
+        vars[0xF]            = 0;
+        uint16_t x           = vars[instr.X] % DISPLAY_WIDTH;
+        uint16_t y           = vars[instr.Y] % DISPLAY_HEIGHT;
         uint8_t sprite;
         for (uint8_t row = 0; row < instr.N; ++row) {
             sprite = emulator->memory[emulator->regs.index + row];
             for (uint8_t col = 0; col < COL_MAX; ++col) {
                 uint8_t cur_x = x + col;
                 uint8_t cur_y = y + row;
-                if (sprite & (1 << (COL_MAX - col - 1))) {
-                    // check each bit of the sprite
-                    set_pixel(emulator, cur_x, cur_y);
+                if (cur_x < DISPLAY_WIDTH && cur_y < DISPLAY_HEIGHT) {
+                    // bounds check on the sprite
+                    if (sprite & (1 << (COL_MAX - col - 1))) {
+                        // check each bit of the sprite
+                        set_pixel(emulator, cur_x, cur_y);
+                    }
                 }
             }
         }
@@ -222,91 +293,27 @@ uint32_t emulate_instruction(uint32_t interval, void *userdata) {
                 emulator->regs.index);
         break;
     case 0xE:
-        // switch (instr.NNN & 0xFF)
         switch (instr.NN) {
         case 0x9E:
-            if (emulator->keypad[emulator->regs.vars[instr.X]]) {
+            if (emulator->keypad[vars[instr.X]]) {
                 emulator->pc += 2;
             }
-            dprintf("Skip if key %X in V%X is held (%sskipped)\n", emulator->regs.vars[instr.X],
-                    instr.X, emulator->keypad[emulator->regs.vars[instr.X]] ? "" : "not ");
+            dprintf("Skip if key %X in V%X is held (%sskipped)\n", vars[instr.X], instr.X,
+                    emulator->keypad[vars[instr.X]] ? "" : "not ");
             break;
         case 0xA1:
-            if (!emulator->keypad[emulator->regs.vars[instr.X]]) {
+            if (!emulator->keypad[vars[instr.X]]) {
                 emulator->pc += 2;
             }
-            dprintf("Skip if key %X in V%X is not held (%sskipped)\n", emulator->regs.vars[instr.X],
-                    instr.X, emulator->keypad[emulator->regs.vars[instr.X]] ? "not " : "");
+            dprintf("Skip if key %X in V%X is not held (%sskipped)\n", vars[instr.X], instr.X,
+                    emulator->keypad[vars[instr.X]] ? "not " : "");
             break;
         default:
             printf("Illegal instruction %X%03X\n", instr.kind, instr.NNN);
             emulator->flags.exit = true;
         }
         break;
-    case 0xF:
-        // switch (instr.NNN & 0xFF)
-        switch (instr.NN) {
-        case 0x07:
-            emulator->regs.vars[instr.X] = emulator->timers.delay;
-            dprintf("Set V%X to value of delay timer (%X)\n", instr.X, emulator->timers.delay);
-            break;
-        case 0x0A: {
-            bool pressed = false;
-            for (int i = 0; i < KEYPAD_ENTRIES; ++i) {
-                if (emulator->keypad[i]) {
-                    emulator->regs.vars[instr.X] = i;
-                    pressed                      = true;
-                    break;
-                }
-            }
-            if (!pressed) {
-                emulator->pc -= 2;
-            }
-            dprintf("Waiting for key (key%s pressed)\n", pressed ? "" : " not");
-            break;
-        }
-        case 0x15:
-            emulator->timers.delay = emulator->regs.vars[instr.X];
-            dprintf("Set delay timer to value of V%X (%X)\n", instr.X, emulator->timers.delay);
-            break;
-        case 0x18:
-            emulator->timers.sound = emulator->regs.vars[instr.X];
-            dprintf("Set sound timer to value of V%X (%X)\n", instr.X, emulator->timers.sound);
-            break;
-        case 0x1E:
-            emulator->regs.index += emulator->regs.vars[instr.X];
-            dprintf("Add V%X to index register (I = %X)\n", instr.X, emulator->regs.index);
-            break;
-        case 0x29:
-            emulator->regs.index = emulator->memory[FONT_HEIGHT_PX * emulator->regs.vars[instr.X]];
-            dprintf("Set index register to font character %X\n", emulator->regs.vars[instr.X]);
-            break;
-        case 0x33:
-            emulator->memory[emulator->regs.index + 2] = emulator->regs.vars[instr.X] / 001 % 10;
-            emulator->memory[emulator->regs.index + 1] = emulator->regs.vars[instr.X] / 010 % 10;
-            emulator->memory[emulator->regs.index + 0] = emulator->regs.vars[instr.X] / 100 % 10;
-            dprintf("Do BCD on V%X: I = %d, I + 1 = %d, I + 2 = %d\n", instr.X,
-                    emulator->memory[emulator->regs.index],
-                    emulator->memory[emulator->regs.index + 1],
-                    emulator->memory[emulator->regs.index + 2]);
-            break;
-        case 0x55:
-            for (int i = 0; i <= instr.X; ++i) {
-                emulator->memory[emulator->regs.index + i] = emulator->regs.vars[i];
-            }
-            dprintf("Store registers V0 - V%X to memory\n", instr.X);
-            break;
-        case 0x65:
-            for (int i = 0; i <= instr.X; ++i) {
-                emulator->regs.vars[i] = emulator->memory[emulator->regs.index + i];
-            }
-            dprintf("Load registers V0 - V%X from memory\n", instr.X);
-            break;
-        default:
-            printf("Illegal instruction %X%03X\n", instr.kind, instr.NNN);
-            emulator->flags.exit = true;
-        }
-        break;
+    case 0xF: handle_misc(emulator, &instr); break;
     default:
         printf("Illegal instruction %X%03X\n", instr.kind, instr.NNN);
         emulator->flags.exit = true;
@@ -345,128 +352,53 @@ void poll_input(chip8 *chip8) {
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
         switch (event.type) {
-        case SDL_QUIT:
-            chip8->flags.exit = true;
-            return;
+        case SDL_QUIT: chip8->flags.exit = true; return;
         case SDL_KEYDOWN:
             switch (event.key.keysym.scancode) {
-            case SDL_SCANCODE_ESCAPE:
-                chip8->flags.exit = true;
-                return;
-            case SDL_SCANCODE_1:
-                chip8->keypad[0x1] = 1;
-                break;
-            case SDL_SCANCODE_2:
-                chip8->keypad[0x2] = 1;
-                break;
-            case SDL_SCANCODE_3:
-                chip8->keypad[0x3] = 1;
-                break;
-            case SDL_SCANCODE_4:
-                chip8->keypad[0xC] = 1;
-                break;
-            case SDL_SCANCODE_Q:
-                chip8->keypad[0x4] = 1;
-                break;
-            case SDL_SCANCODE_W:
-                chip8->keypad[0x5] = 1;
-                break;
-            case SDL_SCANCODE_E:
-                chip8->keypad[0x6] = 1;
-                break;
-            case SDL_SCANCODE_R:
-                chip8->keypad[0xD] = 1;
-                break;
-            case SDL_SCANCODE_A:
-                chip8->keypad[0x7] = 1;
-                break;
-            case SDL_SCANCODE_S:
-                chip8->keypad[0x8] = 1;
-                break;
-            case SDL_SCANCODE_D:
-                chip8->keypad[0x9] = 1;
-                break;
-            case SDL_SCANCODE_F:
-                chip8->keypad[0xE] = 1;
-                break;
-            case SDL_SCANCODE_Z:
-                chip8->keypad[0xA] = 1;
-                break;
-            case SDL_SCANCODE_X:
-                chip8->keypad[0x0] = 1;
-                break;
-            case SDL_SCANCODE_C:
-                chip8->keypad[0xB] = 1;
-                break;
-            case SDL_SCANCODE_V:
-                chip8->keypad[0xF] = 1;
-                break;
+            case SDL_SCANCODE_ESCAPE: chip8->flags.exit = true; return;
+            case SDL_SCANCODE_1: chip8->keypad[0x1] = 1; break;
+            case SDL_SCANCODE_2: chip8->keypad[0x2] = 1; break;
+            case SDL_SCANCODE_3: chip8->keypad[0x3] = 1; break;
+            case SDL_SCANCODE_4: chip8->keypad[0xC] = 1; break;
+            case SDL_SCANCODE_Q: chip8->keypad[0x4] = 1; break;
+            case SDL_SCANCODE_W: chip8->keypad[0x5] = 1; break;
+            case SDL_SCANCODE_E: chip8->keypad[0x6] = 1; break;
+            case SDL_SCANCODE_R: chip8->keypad[0xD] = 1; break;
+            case SDL_SCANCODE_A: chip8->keypad[0x7] = 1; break;
+            case SDL_SCANCODE_S: chip8->keypad[0x8] = 1; break;
+            case SDL_SCANCODE_D: chip8->keypad[0x9] = 1; break;
+            case SDL_SCANCODE_F: chip8->keypad[0xE] = 1; break;
+            case SDL_SCANCODE_Z: chip8->keypad[0xA] = 1; break;
+            case SDL_SCANCODE_X: chip8->keypad[0x0] = 1; break;
+            case SDL_SCANCODE_C: chip8->keypad[0xB] = 1; break;
+            case SDL_SCANCODE_V: chip8->keypad[0xF] = 1; break;
 #ifdef NDEBUG
-            case SDL_SCANCODE_RIGHT:
-                chip8->flags.step = true;
-                break;
-            case SDL_SCANCODE_SPACE:
-                chip8->flags.run ^= true;
+            case SDL_SCANCODE_RIGHT: chip8->flags.step = true; break;
+            case SDL_SCANCODE_SPACE: chip8->flags.run ^= true;
 #endif
-            default:
-                break;
+            default: break;
             }
             break;
         case SDL_KEYUP:
             switch (event.key.keysym.scancode) {
-            case SDL_SCANCODE_ESCAPE:
-                chip8->flags.exit = true;
-                return;
-            case SDL_SCANCODE_1:
-                chip8->keypad[0x1] = 0;
-                break;
-            case SDL_SCANCODE_2:
-                chip8->keypad[0x2] = 0;
-                break;
-            case SDL_SCANCODE_3:
-                chip8->keypad[0x3] = 0;
-                break;
-            case SDL_SCANCODE_4:
-                chip8->keypad[0xC] = 0;
-                break;
-            case SDL_SCANCODE_Q:
-                chip8->keypad[0x4] = 0;
-                break;
-            case SDL_SCANCODE_W:
-                chip8->keypad[0x5] = 0;
-                break;
-            case SDL_SCANCODE_E:
-                chip8->keypad[0x6] = 0;
-                break;
-            case SDL_SCANCODE_R:
-                chip8->keypad[0xD] = 0;
-                break;
-            case SDL_SCANCODE_A:
-                chip8->keypad[0x7] = 0;
-                break;
-            case SDL_SCANCODE_S:
-                chip8->keypad[0x8] = 0;
-                break;
-            case SDL_SCANCODE_D:
-                chip8->keypad[0x9] = 0;
-                break;
-            case SDL_SCANCODE_F:
-                chip8->keypad[0xE] = 0;
-                break;
-            case SDL_SCANCODE_Z:
-                chip8->keypad[0xA] = 0;
-                break;
-            case SDL_SCANCODE_X:
-                chip8->keypad[0x0] = 0;
-                break;
-            case SDL_SCANCODE_C:
-                chip8->keypad[0xB] = 0;
-                break;
-            case SDL_SCANCODE_V:
-                chip8->keypad[0xF] = 0;
-                break;
-            default:
-                break;
+            case SDL_SCANCODE_ESCAPE: chip8->flags.exit = true; return;
+            case SDL_SCANCODE_1: chip8->keypad[0x1] = 0; break;
+            case SDL_SCANCODE_2: chip8->keypad[0x2] = 0; break;
+            case SDL_SCANCODE_3: chip8->keypad[0x3] = 0; break;
+            case SDL_SCANCODE_4: chip8->keypad[0xC] = 0; break;
+            case SDL_SCANCODE_Q: chip8->keypad[0x4] = 0; break;
+            case SDL_SCANCODE_W: chip8->keypad[0x5] = 0; break;
+            case SDL_SCANCODE_E: chip8->keypad[0x6] = 0; break;
+            case SDL_SCANCODE_R: chip8->keypad[0xD] = 0; break;
+            case SDL_SCANCODE_A: chip8->keypad[0x7] = 0; break;
+            case SDL_SCANCODE_S: chip8->keypad[0x8] = 0; break;
+            case SDL_SCANCODE_D: chip8->keypad[0x9] = 0; break;
+            case SDL_SCANCODE_F: chip8->keypad[0xE] = 0; break;
+            case SDL_SCANCODE_Z: chip8->keypad[0xA] = 0; break;
+            case SDL_SCANCODE_X: chip8->keypad[0x0] = 0; break;
+            case SDL_SCANCODE_C: chip8->keypad[0xB] = 0; break;
+            case SDL_SCANCODE_V: chip8->keypad[0xF] = 0; break;
+            default: break;
             }
         }
     }
@@ -499,14 +431,3 @@ uint32_t update_timers(uint32_t interval, void *param) {
     }
     return interval;
 }
-
-// uint32_t run_cycle(uint32_t interval, void *userdata) {
-//     chip8 *emulator = (chip8 *)userdata;
-//     if (emulator->flags.exit) {
-//         return 0;
-//     }
-//     // poll_input(emulator);
-//     emulate_instruction(emulator);
-//     emulator->flags.advance = false;
-//     return interval;
-// }

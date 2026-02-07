@@ -5,7 +5,7 @@ SOURCES = $(wildcard $(SRC_DIR)/*.c)
 OBJS = $(patsubst $(SRC_DIR)/%.c, $(OBJ_DIR)/%.o, $(SOURCES))
 CFLAGS += -Wall -Wextra -Wpedantic -Wformat
 CSTD = -std=c99
-LDFLAGS = -I/usr/include/SDL2 -D_GNU_SOURCE=1 -D_REENTRANT -lSDL2
+LDFLAGS = `pkg-config --libs --cflags sdl2`
 MAKEFLAGS += --no-builtin-rules
 ifeq ($(DEBUG),1)
 	CFLAGS += -DNDEBUG
