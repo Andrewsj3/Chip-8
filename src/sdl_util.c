@@ -21,14 +21,13 @@ void audio_callback(void *userdata, uint8_t *stream, int len) {
     }
 }
 
-bool sdl_create_context(sdl_state *state) {
+bool sdl_create_context(sdl_state *state, int scale_x, int scale_y) {
     if (SDL_Init(SDL_INIT_TIMER | SDL_INIT_AUDIO | SDL_INIT_VIDEO) < 0) {
         return false;
     }
 
-    state->window =
-        SDL_CreateWindow("CHIP-8 Emulator", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-                         DISPLAY_WIDTH * DISPLAY_SCALE, DISPLAY_HEIGHT * DISPLAY_SCALE, 0);
+    state->window = SDL_CreateWindow("CHIP-8 Emulator", SDL_WINDOWPOS_CENTERED,
+                                     SDL_WINDOWPOS_CENTERED, scale_x, scale_y, 0);
     if (!state->window) {
         return false;
     }

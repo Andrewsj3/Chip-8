@@ -12,9 +12,15 @@ typedef struct {
 } sdl_audio_state;
 
 typedef struct {
+    uint8_t r, g, b;
+} sdl_colour;
+
+typedef struct {
     SDL_Window *window;
     SDL_Renderer *renderer;
     sdl_audio_state audio;
+    sdl_colour fg_colour;
+    sdl_colour bg_colour;
 } sdl_state;
 
 typedef struct {
@@ -22,7 +28,7 @@ typedef struct {
     sdl_audio_state *audio;
 } callback_data;
 
-bool sdl_create_context(sdl_state *state);
+bool sdl_create_context(sdl_state *state, int scale_x, int scale_y);
 bool sdl_init_audio(sdl_state *state, callback_data *userdata);
 void sdl_cleanup(sdl_state *state);
 void render(sdl_state *state, chip8 *emulator);

@@ -47,6 +47,11 @@ typedef struct {
     chip8_timers timers;
     chip8_flags flags;
     chip8_regs regs;
+    uint16_t scale_x;
+    uint16_t scale_y;
+    bool slightly_bigger_pixels;
+    // When user sets custom width and height, there may be small gaps. This draws rectangles 1px
+    // wider and taller than normal to compensate
 } chip8;
 
 void dprintf(const char *restrict format, ...);

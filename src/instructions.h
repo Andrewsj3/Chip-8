@@ -1,0 +1,42 @@
+#ifndef INSTRUCTIONS_H_
+#define INSTRUCTIONS_H_
+
+#define CLEAR_SCREEN 0xE0
+#define JUMP 0x1
+#define CALL_SUBROUTINE 0x2
+#define RETURN_FROM_SUBROUTINE 0xEE
+#define JUMP_EQ_IMMEDIATE 0x3
+#define JUMP_NEQ_IMMEDIATE 0x4
+#define JUMP_EQ_REG 0x5
+#define JUMP_NEQ_REG 0x9
+#define SET_REG_TO_IMMEDIATE 0x6
+#define ADD_IMMEDIATE_TO_REG 0x7
+#define MATH 0x8
+#define SET_REG_TO_REG 0x0
+#define OR_REG_WITH_REG 0x1
+#define AND_REG_WITH_REG 0x2
+#define XOR_REG_WITH_REG 0x3
+#define ADD_REG_TO_REG 0x4
+#define SUB_VX_BY_VY 0x5
+#define SHIFT_RIGHT 0x6
+#define SUB_VY_BY_VX 0x7
+#define SHIFT_LEFT 0xE
+#define SET_INDEX 0xA
+#define JUMP_WITH_OFFSET 0xB
+#define RAND 0xC
+#define DISPLAY 0xD
+#define KEY 0xE
+#define KEY_DOWN 0x9E
+#define KEY_UP 0xA1
+#define MISC 0xF
+#define SET_VX_TO_DELAY_TIMER 0x7
+#define GET_KEY 0xA
+#define SET_DELAY_TIMER_TO_VX 0x15
+#define SET_SOUND_TIMER_TO_VX 0x18
+#define ADD_TO_INDEX 0x1E
+#define SET_INDEX_TO_CHAR 0x29
+#define BINARY_TO_DECIMAL 0x33
+#define STORE_MEM 0x55
+#define LOAD_MEM 0x65
+
+#endif // INSTRUCTIONS_H_
